@@ -198,7 +198,8 @@ export function runAdComparison(
     } else {
       // No available actual airing for this eligible placement -> POTENTIALLY MISSING
       // Check if related creatives exist under base reference (e.g. AT-1187 base with different AD version)
-      const baseRef = sched.normRef.split('-')[0];
+      const baseParts = sched.normRef.split('-');
+      const baseRef = baseParts.length > 2 ? baseParts.slice(0, 2).join('-') : baseParts[0];
       const relatedLogs = logAds.filter(l => l.normRef.startsWith(baseRef) && l.normRef !== sched.normRef);
 
       let explanation = `Scheduled for broadcast in "${sched.show}" (${sched.time}), but no matching actual log occurrence was recorded for reference "${sched.ref}".`;

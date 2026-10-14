@@ -83,12 +83,55 @@ describe('Date Utilities & Campaign Validation', () => {
   });
 });
 
-describe('Schedule & Log Parsers', () => {
-  it('normalizes reference codes with irregular whitespace and casing', () => {
-    expect(normalizeRefCode('aad-1918')).toBe('AAD-1918');
-    expect(normalizeRefCode('AT-1187  -1-AD1 ')).toBe('AT-1187-1-AD1');
-    expect(normalizeRefCode(' AT-1086-1-  AD1 ')).toBe('AT-1086-1-AD1');
-    expect(normalizeRefCode('INAD  081-A1')).toBe('INAD 081-A1');
+describe('Reference Code Normalization (Spaces, Hyphens & Casing)', () => {
+  it('normalizes space-separated, hyphen-separated, and mixed variations to the identical key', () => {
+    // Exact requirement: AT-1187-1-AD1, AT-1187 -1-AD1, and AT 1187 1 AD1 must normalize to the same key
+    const canonical = 'AT-1187-1-AD1';
+    expect(normalizeRefCode('AT-1187-1-AD1')).toBe(canonical);
+    expect(normalizeRefCode('AT-1187 -1-AD1')).toBe(canonical);
+    expect(normalizeRefCode('AT 1187 1 AD1')).toBe(canonical);
+    expect(normalizeRefCode('at - 1187 - 1 - ad1')).toBe(canonical);
+    expect(normalizeRefCode('  AT--1187---1-AD1  ')).toBe(canonical);
+    expect(normalizeRefCode('AT_1187_1_AD1')).toBe(canonical);
+    expect(normalizeRefCode('AT-1086-1- AD1')).toBe('AT-1086-1-AD1');
+    expect(normalizeRefCode('AT 1086 1 AD1')).toBe('AT-1086-1-AD1');
+
+    // INAD variations
+    const inadCanonical = 'INAD-081-A1';
+    expect(normalizeRefCode('INAD 081-A1')).toBe(inadCanonical);
+    expect(normalizeRefCode('INAD 081 A1')).toBe(inadCanonical);
+    expect(normalizeRefCode('INAD-081-A1')).toBe(inadCanonical);
+    expect(normalizeRefCode('inad  081  a1')).toBe(inadCanonical);
+
+    // Two-segment codes
+    expect(normalizeRefCode('AAD-1918')).toBe('AAD-1918');
+    expect(normalizeRefCode('AAD 1918')).toBe('AAD-1918');
+    expect(normalizeRefCode('aad - 1918 ')).toBe('AAD-1918');
+    expect(normalizeRefCode('DEMO 1918')).toBe('DEMO-1918');
+    expect(normalizeRefCode('DEMO-1918')).toBe('DEMO-1918');
+  });
+
+  it('strictly preserves meaningful letters and digits and never matches different codes', () => {
+    // Different digits must NEVER match
+    expect(normalizeRefCode('AAD-1918')).not.toBe(normalizeRefCode('AAD-1919'));
+    expect(normalizeRefCode('AT-1187-1-AD1')).not.toBe(normalizeRefCode('AT-1188-1-AD1'));
+
+    // Different prefixes must NEVER match
+    expect(normalizeRefCode('AAD-1918')).not.toBe(normalizeRefCode('AT-1918'));
+
+    // Different creative cut/version suffixes must NEVER match
+    expect(normalizeRefCode('AT-1187-1-AD1')).not.toBe(normalizeRefCode('AT-1187-1-AD2'));
+    expect(normalizeRefCode('INAD-081-A1')).not.toBe(normalizeRefCode('INAD-081-A2'));
+    expect(normalizeRefCode('DEMO-1918')).not.toBe(normalizeRefCode('DEMO-1918A'));
+  });
+
+  it('handles empty, null, undefined, and punctuation-only inputs safely', () => {
+    expect(normalizeRefCode('')).toBe('');
+    expect(normalizeRefCode('   ')).toBe('');
+    expect(normalizeRefCode('---')).toBe('');
+    expect(normalizeRefCode(' _ - ')).toBe('');
+    expect(normalizeRefCode(null)).toBe('');
+    expect(normalizeRefCode(undefined)).toBe('');
   });
 
   it('parses duration strings into seconds', () => {
@@ -314,6 +357,189 @@ describe('Comparison Engine Core Logic', () => {
 
     expect(result.summary.matchedPlacements).toBe(1);
     expect(result.summary.possibleDuplicates).toBe(1);
+  });
+
+  it('prevents false missing-ad results when schedule and log differ in spaces vs hyphens', () => {
+    const scheduleRecords = [
+      {
+        id: 's-spaced-1',
+        lineIndex: 1,
+        dateCol: 'Morning',
+        show: 'Show A',
+        time: '08:00',
+        placements: 'Beginning',
+        ref: 'AT-1187 -1-AD1', // Hyphen with space
+        normRef: normalizeRefCode('AT-1187 -1-AD1'),
+        advert: 'Test Ad 1',
+        sec: 30,
+        rawStartDate: 'Ongoing',
+        rawEndDate: 'Ongoing',
+        startDate: null,
+        endDate: null,
+        isExpired: false,
+        isNotStarted: false,
+        raw: '',
+      },
+      {
+        id: 's-spaced-2',
+        lineIndex: 2,
+        dateCol: 'Morning',
+        show: 'Show B',
+        time: '09:00',
+        placements: 'Middle',
+        ref: 'INAD 081-A1', // Space then hyphen
+        normRef: normalizeRefCode('INAD 081-A1'),
+        advert: 'Test Ad 2',
+        sec: 30,
+        rawStartDate: 'Ongoing',
+        rawEndDate: 'Ongoing',
+        startDate: null,
+        endDate: null,
+        isExpired: false,
+        isNotStarted: false,
+        raw: '',
+      },
+      {
+        id: 's-spaced-3',
+        lineIndex: 3,
+        dateCol: 'Afternoon',
+        show: 'Show C',
+        time: '14:00',
+        placements: 'Ending',
+        ref: 'DEMO 1918', // Space-separated
+        normRef: normalizeRefCode('DEMO 1918'),
+        advert: 'Test Ad 3',
+        sec: 30,
+        rawStartDate: 'Ongoing',
+        rawEndDate: 'Ongoing',
+        startDate: null,
+        endDate: null,
+        isExpired: false,
+        isNotStarted: false,
+        raw: '',
+      },
+    ];
+
+    const logRecords = [
+      {
+        id: 'l-spaced-1',
+        lineIndex: 101,
+        timestamp: '13-10-2026 08:02:00',
+        date: '13-10-2026',
+        time: '08:02:00',
+        eventId: 'E101',
+        item: 'AT 1187 1 AD1  Test Ad 1', // Space-separated in log
+        ref: 'AT 1187 1 AD1',
+        normRef: normalizeRefCode('AT 1187 1 AD1'),
+        advert: 'Test Ad 1',
+        duration: '00:00:30',
+        durationSec: 30,
+        isAd: true,
+        raw: '',
+      },
+      {
+        id: 'l-spaced-2',
+        lineIndex: 102,
+        timestamp: '13-10-2026 09:05:00',
+        date: '13-10-2026',
+        time: '09:05:00',
+        eventId: 'E102',
+        item: 'INAD 081 A1  Test Ad 2', // Space-separated in log
+        ref: 'INAD 081 A1',
+        normRef: normalizeRefCode('INAD 081 A1'),
+        advert: 'Test Ad 2',
+        duration: '00:00:30',
+        durationSec: 30,
+        isAd: true,
+        raw: '',
+      },
+      {
+        id: 'l-spaced-3',
+        lineIndex: 103,
+        timestamp: '13-10-2026 14:02:00',
+        date: '13-10-2026',
+        time: '14:02:00',
+        eventId: 'E103',
+        item: 'DEMO-1918  Test Ad 3', // Hyphenated in log
+        ref: 'DEMO-1918',
+        normRef: normalizeRefCode('DEMO-1918'),
+        advert: 'Test Ad 3',
+        duration: '00:00:30',
+        durationSec: 30,
+        isAd: true,
+        raw: '',
+      },
+    ];
+
+    const result = runAdComparison(scheduleRecords, logRecords, { broadcastDate });
+
+    // All 3 should match; zero false missing-ad results!
+    expect(result.summary.eligiblePlacements).toBe(3);
+    expect(result.summary.matchedPlacements).toBe(3);
+    expect(result.summary.potentiallyMissingPlacements).toBe(0);
+    expect(result.summary.extraAirings).toBe(0);
+
+    // Verify original reference codes are preserved for display and export
+    const item1 = result.items.find(i => i.scheduleEvidence[0]?.id === 's-spaced-1');
+    expect(item1?.ref).toBe('AT-1187 -1-AD1'); // Preserves schedule original
+    expect(item1?.logEvidence[0]?.ref).toBe('AT 1187 1 AD1'); // Preserves log original
+  });
+
+  it('strictly isolates codes differing in digits or letters and does not false-match them', () => {
+    const scheduleRecords = [
+      {
+        id: 's-diff',
+        lineIndex: 1,
+        dateCol: 'Morning',
+        show: 'Show Alpha',
+        time: '08:00',
+        placements: 'Beginning',
+        ref: 'DEMO-1918',
+        normRef: normalizeRefCode('DEMO-1918'),
+        advert: 'Product A',
+        sec: 30,
+        rawStartDate: 'Ongoing',
+        rawEndDate: 'Ongoing',
+        startDate: null,
+        endDate: null,
+        isExpired: false,
+        isNotStarted: false,
+        raw: '',
+      },
+    ];
+
+    // Log has DEMO-1919 (different digit!)
+    const logRecords = [
+      {
+        id: 'l-diff',
+        lineIndex: 1,
+        timestamp: '13-10-2026 08:05:00',
+        date: '13-10-2026',
+        time: '08:05:00',
+        eventId: 'E1',
+        item: 'DEMO-1919  Product B',
+        ref: 'DEMO-1919',
+        normRef: normalizeRefCode('DEMO-1919'),
+        advert: 'Product B',
+        duration: '00:00:30',
+        durationSec: 30,
+        isAd: true,
+        raw: '',
+      },
+    ];
+
+    const result = runAdComparison(scheduleRecords, logRecords, { broadcastDate });
+
+    // Must NOT match
+    expect(result.summary.matchedPlacements).toBe(0);
+    expect(result.summary.potentiallyMissingPlacements).toBe(1);
+    expect(result.summary.extraAirings).toBe(1);
+
+    const missingItem = result.items.find(i => i.status === 'POTENTIALLY_MISSING');
+    expect(missingItem?.ref).toBe('DEMO-1918');
+
+    const extraItem = result.items.find(i => i.status === 'EXTRA_AIRING');
+    expect(extraItem?.ref).toBe('DEMO-1919');
   });
 
   it('flags duration variance as NEEDS_MANUAL_REVIEW when exceeding tolerance', () => {

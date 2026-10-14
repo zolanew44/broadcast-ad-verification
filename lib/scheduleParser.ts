@@ -9,21 +9,8 @@ export interface ScheduleParseResult {
   headers: string[];
 }
 
-/**
- * Normalizes an advertising reference code.
- * E.g.: "AAD-1918" -> "AAD-1918"
- *       "AT-1187 -1-AD1" -> "AT-1187-1-AD1"
- *       "AT-1086-1- AD1" -> "AT-1086-1-AD1"
- *       "INAD 081-A1" -> "INAD 081-A1"
- */
-export function normalizeRefCode(ref?: string | null): string {
-  if (!ref) return '';
-  return ref
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, ' ')
-    .replace(/\s*-\s*/g, '-');
-}
+import { normalizeRefCode } from './refNormalizer';
+export { normalizeRefCode };
 
 /**
  * Parses schedule raw text into structured ScheduleRecord items.

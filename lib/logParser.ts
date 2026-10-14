@@ -1,5 +1,5 @@
 import { LogRecord } from '@/types';
-import { normalizeRefCode } from './scheduleParser';
+import { normalizeRefCode } from './refNormalizer';
 
 export interface LogParseResult {
   records: LogRecord[];
@@ -10,23 +10,41 @@ export interface LogParseResult {
 }
 
 /**
- * Regex to recognize advertising reference codes in the Item column:
- * Matches patterns like:
- * - AAD-1774
- * - AT-1292-1-AD1
- * - AT-1187 -1-AD2
- * - AT-1086-1- AD1
- * - INAD 081-A2
- * - EAD-087-AD6
- * - FTAD-021
- * - FAD-018
- */
-const AD_REF_PATTERN = /^((?:[A-Z]{2,6}\s*(?:-\s*\d+|\s+\d+)(?:\s*-\s*[A-Z0-9]+)*))\s+(.*)$/i;
-
-/**
  * Patterns that represent station interstitials, transition bumpers, or programs rather than commercial ads.
  */
 const NON_AD_PREFIXES = /^(TRAN\s+|ABBAY\s+FILM|የማስታወቂያ\s+ሰአት|ID\s+|PROMO\s+|BUMPER\s+)/i;
+
+/**
+ * Extracts reference code and advert title from a broadcast playout log item string.
+ * Handles both hyphenated and space-separated reference codes without confusing title words.
+ */
+export function extractLogRefAndAdvert(item: string): { ref: string; advert: string } | null {
+  if (!item || NON_AD_PREFIXES.test(item)) return null;
+
+  // 1. If multi-space (2+ spaces or tab) separates ref and title
+  // Example: "AT 1187 1 AD1  Awach Title" or "AAD-1774  SKL Title"
+  const multiSpace = item.match(/^([A-Z]{2,6}(?:[\s\-]+[A-Z0-9]+)+?)\s{2,}(.*)$/i);
+  if (multiSpace && /\d/.test(multiSpace[1])) {
+    return { ref: multiSpace[1].trim(), advert: multiSpace[2].trim() };
+  }
+
+  // 2. If single-space, reference tokens after prefix must be numeric, hyphenated, or specific AD-cuts
+  // Example: "AT-1187-1-AD1 Awach Title", "AT 1187 1 AD1 Awach", "INAD 081 A1 Ruggas"
+  const singleSpace = item.match(/^([A-Z]{2,6}(?:-(?:[A-Z0-9]+)|\s+(?:\d+|AD\d*|A\d+))+)\s+(.*)$/i);
+  if (singleSpace && /\d/.test(singleSpace[1])) {
+    return { ref: singleSpace[1].trim(), advert: singleSpace[2].trim() };
+  }
+
+  // 3. Fallback: standard hyphenated code
+  // Example: "DEMO-1918 Title" or "AAD-1918"
+  const hyphenPattern = /^([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)\s*(.*)$/i;
+  const hm = item.match(hyphenPattern);
+  if (hm && /\d/.test(hm[1])) {
+    return { ref: hm[1].trim(), advert: hm[2].trim() };
+  }
+
+  return null;
+}
 
 /**
  * Parses duration "HH:MM:SS" into total seconds
@@ -112,13 +130,11 @@ export function parseLogText(text: string): LogParseResult {
     let ref = '';
     let advert = item;
 
-    if (!NON_AD_PREFIXES.test(item)) {
-      const match = item.match(AD_REF_PATTERN);
-      if (match) {
-        isAd = true;
-        ref = match[1].trim();
-        advert = match[2] ? match[2].trim() : '';
-      }
+    const extracted = extractLogRefAndAdvert(item);
+    if (extracted) {
+      isAd = true;
+      ref = extracted.ref;
+      advert = extracted.advert;
     }
 
     const durationSec = parseDurationToSeconds(duration);
