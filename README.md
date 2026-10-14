@@ -23,22 +23,22 @@ A production-ready web application designed for television and radio broadcast t
 
 ---
 
-## 2. Verified Test Fixture Findings (October 13, 2026)
+## 2. Verification Engine Capabilities & Demo Fixtures
 
-When tested against the production sample files (`New Text Document.txt` and `2026-10-13.log`):
+The verification engine deterministically resolves daily broadcasting discrepancies:
 
-1. **`AAD-1918` (`DA Tigrigna up`):**
-   - **Planned Placements:** 2 placements scheduled (Line #172 in *መቅዲ ሾው* and Line #368 in *Abbay Films*).
-   - **Actual Playout Occurrences:** 1 occurrence logged at `17:35:19` (Line #419).
-   - **Result:** 1 placement successfully matched; 1 placement correctly flagged as **Potentially Missing** with line-level evidence and make-good recommendation.
-2. **`AT-1187 -1-AD1` (`Awach`):**
-   - **Scheduled End Date:** October 3, 2026.
-   - **Broadcast Date:** October 13, 2026.
-   - **Result:** Successfully isolated as **Expired Campaign** (10 days past campaign expiration). Excluded from confirmed missed counts and reported with traffic clean-up instructions.
-3. **Playout Integrity:**
-   - 173 eligible placements evaluated with ~98.2% on-air compliance.
-   - 16 expired campaign placements flagged for traffic schedule removal.
-   - Extra playouts and potential double-plays isolated.
+1. **Partial Delivery & Placement Counting:**
+   - **Scenario:** An advertisement is booked for multiple placements throughout the day (e.g. 2 scheduled slots).
+   - **Playout Occurrence:** Playout automation logs record only 1 matching broadcast event.
+   - **Engine Behavior:** Matches the first placement chronologically and flags the second placement as **Potentially Missing** with line-level evidence and a make-good recommendation.
+2. **Contract Campaign Date Isolation:**
+   - **Scenario:** A commercial spot has a contract end date prior to the target broadcast date.
+   - **Engine Behavior:** Accurately isolates the placement under **Expired Campaign**. It is excluded from confirmed missed commercial counts and flagged for traffic schedule clean-up.
+3. **Playout Integrity & Non-Ad Interstitials:**
+   - Station break transitions, network bumpers, and sponsor billboard lead-ins without reference codes are safely identified under **Transition / Warning** rather than creating false missed-ad alarms.
+   - Extra playouts and potential double-plays (airings within 3 minutes of each other) are automatically flagged.
+
+The public web application includes bundled **1-Click Synthetic Demo Fixtures** (`DEMO-1918`, `DEMO-1187`, etc.) so evaluators and traffic managers can test every feature immediately without uploading proprietary files. Real operational files are processed 100% locally in browser memory.
 
 ---
 
