@@ -20,12 +20,14 @@ import {
   MessageSquare,
   Sparkles,
   ArrowUpDown,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { AdDiscrepancyItem, VerificationStatus } from '@/types';
 
 interface DiscrepancyTableProps {
   items: AdDiscrepancyItem[];
   onToggleReviewed: (itemId: string, note?: string) => void;
+  onOpenFixItem?: (item: AdDiscrepancyItem) => void;
   selectedStatusFilter: string;
   onSelectStatusFilter: (status: string) => void;
 }
@@ -33,6 +35,7 @@ interface DiscrepancyTableProps {
 export const DiscrepancyTable: React.FC<DiscrepancyTableProps> = ({
   items,
   onToggleReviewed,
+  onOpenFixItem,
   selectedStatusFilter,
   onSelectStatusFilter,
 }) => {
@@ -407,7 +410,21 @@ export const DiscrepancyTable: React.FC<DiscrepancyTableProps> = ({
                       }`}
                     >
                       <td className="py-3 px-4 whitespace-nowrap">
-                        {getStatusBadge(item.status)}
+                        <div className="flex flex-col items-start gap-1">
+                          {getStatusBadge(item.status)}
+                          {item.isManuallyCorrected && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200 font-semibold">
+                              Manually corrected
+                            </span>
+                          )}
+                          {item.matchTier && item.matchTier !== 'UNMATCHED' && !item.isManuallyCorrected && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                              {item.matchTier === 'EXACT_REF' && 'Exact Ref'}
+                              {item.matchTier === 'CONSTRAINED_NORM_REF' && 'Norm Ref'}
+                              {item.matchTier === 'UNAMBIGUOUS_NAME' && 'Title Match'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
                         {item.ref}
@@ -598,7 +615,7 @@ export const DiscrepancyTable: React.FC<DiscrepancyTableProps> = ({
 
                             {/* Operator Review & Session Notes */}
                             <div className="p-3.5 rounded-xl bg-white border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                              <div className="flex items-center space-x-3 w-full sm:w-auto">
+                              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                                 <label className="flex items-center space-x-2 cursor-pointer text-xs font-semibold text-slate-800">
                                   <input
                                     type="checkbox"
@@ -608,6 +625,18 @@ export const DiscrepancyTable: React.FC<DiscrepancyTableProps> = ({
                                   />
                                   <span>Mark Record as Reviewed</span>
                                 </label>
+
+                                {item.status === 'POTENTIALLY_MISSING' && onOpenFixItem && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenFixItem(item)}
+                                    className="py-1 px-2.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center space-x-1"
+                                    title="Open Log Correction Studio for this placement"
+                                  >
+                                    <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
+                                    <span>Fix / Record This Airing</span>
+                                  </button>
+                                )}
                               </div>
 
                               <div className="flex items-center space-x-2 w-full sm:w-2/3">

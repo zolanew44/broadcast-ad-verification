@@ -4,7 +4,14 @@ import * as path from 'path';
 import { decodeFileBuffer } from '../lib/encoding';
 import { parseCampaignDate, extractBroadcastDate, formatDateISO } from '../lib/dateUtils';
 import { parseScheduleText, normalizeRefCode } from '../lib/scheduleParser';
-import { parseLogText, parseDurationToSeconds } from '../lib/logParser';
+import { parseLogText, parseDurationToSeconds, extractLogRefAndAdvert } from '../lib/logParser';
+import {
+  normalizeUnicode,
+  normalizeRefExact,
+  normalizeRefCanonical,
+  normalizeAdvertName,
+  extractAdVersion,
+} from '../lib/refNormalizer';
 import { runAdComparison } from '../lib/comparisonEngine';
 import { buildComparisonWorkbook, buildComparisonPDF } from '../lib/reportGenerators';
 import {
@@ -745,5 +752,197 @@ describe('Local Private Fixtures (October 13, 2026 - Production Data)', () => {
 
     const pdf = buildComparisonPDF(result);
     expect(pdf.getNumberOfPages()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('Priority 3-Tier Matching Strategy & Robust Log Parsing', () => {
+  const broadcastDate = new Date(Date.UTC(2026, 9, 13));
+
+  it('normalizes Unicode characters, soft hyphens, and invisible whitespace', () => {
+    // Soft hyphen (\u00AD) and invisible zero-width space (\u200B)
+    const softHyphen = 'AT\u00AD1187\u00AD1\u00ADAD1';
+    expect(normalizeRefCanonical(softHyphen)).toBe('AT-1187-1-AD1');
+
+    const zeroWidth = 'AT\u200B-1187\u00A0-1-AD1\uFEFF';
+    expect(normalizeRefExact(zeroWidth)).toBe('AT-1187-1-AD1');
+    expect(normalizeRefCanonical(zeroWidth)).toBe('AT-1187-1-AD1');
+
+    // Various Unicode dashes (en dash \u2013, em dash \u2014, minus \u2212)
+    const unicodeDashes = 'AT\u20131187\u20141\u2212AD1';
+    expect(normalizeRefCanonical(unicodeDashes)).toBe('AT-1187-1-AD1');
+  });
+
+  it('correctly extracts reference codes of arbitrary prefix lengths and various delimiters', () => {
+    // Pipe delimiter
+    const pipe = extractLogRefAndAdvert('GLOBAL-9000 | Ethiopian Airlines 30s');
+    expect(pipe).toEqual({ ref: 'GLOBAL-9000', advert: 'Ethiopian Airlines 30s' });
+
+    // Double slash delimiter
+    const slash = extractLogRefAndAdvert('C-101 // Fresh Coffee Promo');
+    expect(slash).toEqual({ ref: 'C-101', advert: 'Fresh Coffee Promo' });
+
+    // Colon delimiter
+    const colon = extractLogRefAndAdvert('AAD-1918: DA Tigrigna up');
+    expect(colon).toEqual({ ref: 'AAD-1918', advert: 'DA Tigrigna up' });
+
+    // Tab delimiter
+    const tab = extractLogRefAndAdvert('K-10\tSpring Sale');
+    expect(tab).toEqual({ ref: 'K-10', advert: 'Spring Sale' });
+
+    // Hyphen with spaces
+    const spacedDash = extractLogRefAndAdvert('BRAND-X-10 - Special Offer');
+    expect(spacedDash).toEqual({ ref: 'BRAND-X-10', advert: 'Special Offer' });
+
+    // Multi-space delimiter
+    const multiSpace = extractLogRefAndAdvert('AT 1187 1 AD1   Awach Insurance');
+    expect(multiSpace).toEqual({ ref: 'AT 1187 1 AD1', advert: 'Awach Insurance' });
+
+    // Single-space space-token code
+    const singleSpaceTokens = extractLogRefAndAdvert('AT 1187 1 AD1 Awach Insurance');
+    expect(singleSpaceTokens).toEqual({ ref: 'AT 1187 1 AD1', advert: 'Awach Insurance' });
+
+    // Single-space arbitrary length hyphenated code
+    const singleSpaceHyphen = extractLogRefAndAdvert('GLOBAL-9000 Ethiopian Airlines');
+    expect(singleSpaceHyphen).toEqual({ ref: 'GLOBAL-9000', advert: 'Ethiopian Airlines' });
+
+    // Standalone code without title
+    const standalone = extractLogRefAndAdvert('GLOBAL-9000');
+    expect(standalone).toEqual({ ref: 'GLOBAL-9000', advert: '' });
+
+    // Station interstitials and non-ad lines return null
+    expect(extractLogRefAndAdvert('TRAN Station ID 01')).toBeNull();
+    expect(extractLogRefAndAdvert('ABBAY FILM')).toBeNull();
+    expect(extractLogRefAndAdvert('የማስታወቂያ ሰአት')).toBeNull();
+    expect(extractLogRefAndAdvert('Evening Program News')).toBeNull();
+  });
+
+  it('matches via Tier 1 (EXACT_REF) when reference code matches exactly', () => {
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Show\t08:00\tBeginning\tAT-1187-1-AD1\tAwach Insurance\t69\tOct 01/2026\tOngoing\r\n';
+    const logText = '13-10-2026 08:05:00\t00000001\tAT-1187-1-AD1 Awach Insurance\t00:01:09\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.matchedPlacements).toBe(1);
+    expect(res.items[0].status).toBe('MATCHED');
+    expect(res.items[0].matchTier).toBe('EXACT_REF');
+    expect(res.items[0].explanation).toContain('exact reference code match');
+  });
+
+  it('matches via Tier 2 (CONSTRAINED_NORM_REF) when reference code has space vs hyphen formatting differences', () => {
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Show\t08:00\tBeginning\tAT-1187 -1-AD1\tAwach Insurance\t69\tOct 01/2026\tOngoing\r\n';
+    // Log has space-separated tokens: AT 1187 1 AD1
+    const logText = '13-10-2026 08:05:00\t00000001\tAT 1187 1 AD1  Awach Insurance\t00:01:09\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.matchedPlacements).toBe(1);
+    expect(res.items[0].status).toBe('MATCHED');
+    expect(res.items[0].matchTier).toBe('CONSTRAINED_NORM_REF');
+    expect(res.items[0].explanation).toContain('normalized reference match');
+  });
+
+  it('matches via Tier 3 (UNAMBIGUOUS_NAME) when reference code differs but advert title and duration uniquely match', () => {
+    // Schedule has ref DEMO-A, Log has ref DEMO-B (e.g. traffic system re-coded the ref), but identical title and duration
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Show\t08:00\tBeginning\tCLIENT-CODE-A\tUnique Ethiopian Coffee Campaign\t30\tOct 01/2026\tOngoing\r\n';
+    const logText = '13-10-2026 08:05:00\t00000001\tSERVER-CODE-B | Unique Ethiopian Coffee Campaign\t00:00:30\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.matchedPlacements).toBe(1);
+    expect(res.items[0].status).toBe('MATCHED');
+    expect(res.items[0].matchTier).toBe('UNAMBIGUOUS_NAME');
+    expect(res.items[0].explanation).toContain('matched by unambiguous advert title');
+  });
+
+  it('strictly prevents cross-variant matching between AD1 and AD2, flagging for manual review', () => {
+    // Schedule planned AD1, but broadcast played AD2
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Show\t08:00\tBeginning\tAT-1187-1-AD1\tAwach Insurance\t69\tOct 01/2026\tOngoing\r\n';
+    const logText = '13-10-2026 08:05:00\t00000001\tAT-1187-1-AD2 Awach Insurance\t00:01:09\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    // AD1 MUST NEVER match AD2!
+    expect(res.summary.matchedPlacements).toBe(0);
+    expect(res.summary.needsManualReview).toBe(1);
+
+    const reviewItem = res.items.find(i => i.status === 'NEEDS_MANUAL_REVIEW');
+    expect(reviewItem).toBeDefined();
+    expect(reviewItem?.explanation).toContain('Creative cut discrepancy');
+    expect(reviewItem?.explanation).toContain('AD1');
+    expect(reviewItem?.explanation).toContain('AD2');
+  });
+
+  it('flags ambiguous advert titles for manual review when multiple competing placements exist', () => {
+    // Two different schedule slots with different refs have identical title
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Show\t08:00\tBeginning\tBANK-01\tGeneric Savings Promo\t30\tOct 01/2026\tOngoing\r\n' +
+      'Evening\tEvening Show\t19:00\tBeginning\tBANK-02\tGeneric Savings Promo\t30\tOct 01/2026\tOngoing\r\n';
+    // Log has single playout under unmapped code
+    const logText = '13-10-2026 08:05:00\t00000001\tOTHER-999 | Generic Savings Promo\t00:00:30\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    // Must not guess which placement was aired; flag for review
+    expect(res.summary.matchedPlacements).toBe(0);
+    expect(res.summary.needsManualReview).toBeGreaterThanOrEqual(1);
+  });
+
+  it('strictly maintains 1-to-1 placement accounting for repeated placements and partial delivery', () => {
+    // C-101 scheduled 3 times (Morning, Afternoon, Evening)
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tShow A\t08:00\tBeginning\tC-101\tCoffee Campaign\t30\tOct 01/2026\tOngoing\r\n' +
+      'Afternoon\tShow B\t14:00\tMiddle\tC-101\tCoffee Campaign\t30\tOct 01/2026\tOngoing\r\n' +
+      'Evening\tShow C\t20:00\tEnding\tC-101\tCoffee Campaign\t30\tOct 01/2026\tOngoing\r\n';
+
+    // Log has only 2 airings
+    const logText = '13-10-2026 08:02:00\t00000001\tC-101 // Coffee Campaign\t00:00:30\r\n' +
+      '13-10-2026 14:05:00\t00000002\tC-101 // Coffee Campaign\t00:00:30\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.eligiblePlacements).toBe(3);
+    expect(res.summary.matchedPlacements).toBe(2);
+    expect(res.summary.potentiallyMissingPlacements).toBe(1);
+    expect(res.summary.extraAirings).toBe(0);
+
+    const missingItem = res.items.find(i => i.status === 'POTENTIALLY_MISSING');
+    expect(missingItem?.program).toBe('Show C');
+  });
+
+  it('correctly classifies rapid repeats as POSSIBLE_DUPLICATE and separate playouts as EXTRA_AIRING', () => {
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tShow A\t08:00\tBeginning\tGLOBAL-9000\tEthiopian Airlines\t30\tOct 01/2026\tOngoing\r\n';
+
+    // 1 scheduled, 3 logged:
+    // Event 1 at 08:00:00 (matches scheduled)
+    // Event 2 at 08:01:15 (within 75s of Event 1 -> POSSIBLE_DUPLICATE)
+    // Event 3 at 18:00:00 (hours later -> EXTRA_AIRING)
+    const logText = '13-10-2026 08:00:00\t00000001\tGLOBAL-9000 Ethiopian Airlines\t00:00:30\r\n' +
+      '13-10-2026 08:01:15\t00000002\tGLOBAL-9000 Ethiopian Airlines\t00:00:30\r\n' +
+      '13-10-2026 18:00:00\t00000003\tGLOBAL-9000 Ethiopian Airlines\t00:00:30\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.matchedPlacements).toBe(1);
+    expect(res.summary.possibleDuplicates).toBe(1);
+    expect(res.summary.extraAirings).toBe(1);
   });
 });

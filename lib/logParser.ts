@@ -1,5 +1,12 @@
 import { LogRecord } from '@/types';
-import { normalizeRefCode } from './refNormalizer';
+import {
+  normalizeUnicode,
+  normalizeRefExact,
+  normalizeRefCanonical,
+  normalizeRefCode,
+  normalizeAdvertName,
+  extractAdVersion,
+} from './refNormalizer';
 
 export interface LogParseResult {
   records: LogRecord[];
@@ -12,35 +19,64 @@ export interface LogParseResult {
 /**
  * Patterns that represent station interstitials, transition bumpers, or programs rather than commercial ads.
  */
-const NON_AD_PREFIXES = /^(TRAN\s+|ABBAY\s+FILM|የማስታወቂያ\s+ሰአት|ID\s+|PROMO\s+|BUMPER\s+)/i;
+const NON_AD_PREFIXES = /^(TRAN\s+|ABBAY\s+FILM|የማስታወቂያ\s+ሰአት|ID\s+|PROMO\s+|BUMPER\s+|STATION\s+ID)/i;
 
 /**
  * Extracts reference code and advert title from a broadcast playout log item string.
- * Handles both hyphenated and space-separated reference codes without confusing title words.
+ * Supports arbitrary prefix lengths, arbitrary delimiters (tabs, pipes, double slashes,
+ * colons, dashes, multi-space), and space-separated reference codes without confusing title words.
  */
 export function extractLogRefAndAdvert(item: string): { ref: string; advert: string } | null {
-  if (!item || NON_AD_PREFIXES.test(item)) return null;
+  if (!item) return null;
+  const text = normalizeUnicode(item).trim();
+  if (!text || NON_AD_PREFIXES.test(text)) return null;
 
-  // 1. If multi-space (2+ spaces or tab) separates ref and title
-  // Example: "AT 1187 1 AD1  Awach Title" or "AAD-1774  SKL Title"
-  const multiSpace = item.match(/^([A-Z]{2,6}(?:[\s\-]+[A-Z0-9]+)+?)\s{2,}(.*)$/i);
+  // 1. Explicit delimiter: tab (\t), pipe (|), double slash (//), colon (:)
+  // Example: "GLOBAL-9000 | Ethiopian Airlines", "C-101 // Coffee Promo", "AAD-1918: DA Tigrigna up"
+  const delimMatch = text.match(/^([^|\t/:/\\]+?)\s*(?:\t|\||\/\/|:\s)\s*(.+)$/);
+  if (delimMatch) {
+    const left = delimMatch[1].trim();
+    const right = delimMatch[2].trim();
+    if (left && right && !NON_AD_PREFIXES.test(left)) {
+      return { ref: left, advert: right };
+    }
+  }
+
+  // 2. Multi-space separation (2 or more spaces or tab) between ref and title
+  // Example: "AT 1187 1 AD1  Awach Title", "AAD-1774  SKL Title", "C-101   Coffee Promo"
+  const multiSpace = text.match(/^([A-Z0-9_\-]+(?:\s+[A-Z0-9_\-]+)*?)\s{2,}(.*)$/i);
   if (multiSpace && /\d/.test(multiSpace[1])) {
     return { ref: multiSpace[1].trim(), advert: multiSpace[2].trim() };
   }
 
-  // 2. If single-space, reference tokens after prefix must be numeric, hyphenated, or specific AD-cuts
-  // Example: "AT-1187-1-AD1 Awach Title", "AT 1187 1 AD1 Awach", "INAD 081 A1 Ruggas"
-  const singleSpace = item.match(/^([A-Z]{2,6}(?:-(?:[A-Z0-9]+)|\s+(?:\d+|AD\d*|A\d+))+)\s+(.*)$/i);
-  if (singleSpace && /\d/.test(singleSpace[1])) {
-    return { ref: singleSpace[1].trim(), advert: singleSpace[2].trim() };
+  // 3. Hyphen with surrounding spaces separating ref from title
+  // Example: "AAD-1918 - DA Tigrigna up", "GLOBAL-9000 - Product Launch"
+  const spacedDash = text.match(/^([A-Z0-9_\-]+(?:\s+[A-Z0-9_\-]+)*?)\s+[-–—]\s+(.+)$/i);
+  if (spacedDash && /\d/.test(spacedDash[1])) {
+    return { ref: spacedDash[1].trim(), advert: spacedDash[2].trim() };
   }
 
-  // 3. Fallback: standard hyphenated code
-  // Example: "DEMO-1918 Title" or "AAD-1918"
-  const hyphenPattern = /^([A-Z0-9]+(?:\s*-\s*[A-Z0-9]+)+)\s*(.*)$/i;
-  const hm = item.match(hyphenPattern);
-  if (hm && /\d/.test(hm[1])) {
-    return { ref: hm[1].trim(), advert: hm[2].trim() };
+  // 4. Single-space separation:
+  // 4a. Hyphenated or delimited code of arbitrary prefix length
+  // Example: "GLOBAL-9000 Launch Title", "C-101 Coffee Promo", "AT-1187-1-AD1 Awach Title"
+  const hyphenMatch = text.match(/^([A-Z0-9]+(?:[\-_][A-Z0-9]+)+)\s+(.*)$/i);
+  if (hyphenMatch && /\d/.test(hyphenMatch[1])) {
+    return { ref: hyphenMatch[1].trim(), advert: hyphenMatch[2].trim() };
+  }
+
+  // 4b. Space-separated reference tokens:
+  // Prefix followed by numeric tokens or creative version cuts (AD1, A1, CUT 1, etc.)
+  // Example: "AT 1187 1 AD1 Awach Title", "INAD 081 A1 Ruggas Soft Drink"
+  const spaceTokensMatch = text.match(/^([A-Z0-9]+(?:\s+(?:\d+|AD\d*|A\d+|CUT\s*\d+|V\d+|VERSION\s*\d+))+)\s+(.*)$/i);
+  if (spaceTokensMatch && /\d/.test(spaceTokensMatch[1])) {
+    return { ref: spaceTokensMatch[1].trim(), advert: spaceTokensMatch[2].trim() };
+  }
+
+  // 5. Standalone reference code with no trailing title
+  // Example: "AAD-1918", "AT-1187-1-AD1", "GLOBAL-9000", "C-101", "AT 1187 1 AD1"
+  const standaloneMatch = text.match(/^([A-Z0-9]+(?:[\s\-_]+[A-Z0-9]+)*)$/i);
+  if (standaloneMatch && /\d/.test(standaloneMatch[1])) {
+    return { ref: standaloneMatch[1].trim(), advert: '' };
   }
 
   return null;
@@ -96,7 +132,16 @@ export function parseLogText(text: string): LogParseResult {
     let item = '';
     let duration = '';
 
-    if (parts.length >= 4) {
+    const lastPart = parts[parts.length - 1].trim();
+    const isLastPartDuration = /^\d{1,2}:\d{2}(?::\d{2})?$|^\d+s?$/i.test(lastPart);
+
+    if (isLastPartDuration && parts.length >= 4) {
+      duration = lastPart;
+      item = parts.slice(2, parts.length - 1).join('  ').trim();
+    } else if (isLastPartDuration && parts.length === 3) {
+      duration = lastPart;
+      item = parts[1].trim();
+    } else if (parts.length >= 4) {
       item = parts[2].trim();
       duration = parts[3].trim();
     } else if (parts.length === 3) {
@@ -148,8 +193,11 @@ export function parseLogText(text: string): LogParseResult {
       eventId,
       item,
       ref,
-      normRef: normalizeRefCode(ref),
+      exactRef: normalizeRefExact(ref),
+      normRef: normalizeRefCanonical(ref),
       advert,
+      normAdvert: normalizeAdvertName(advert),
+      adVersion: extractAdVersion(ref, advert),
       duration,
       durationSec,
       isAd,

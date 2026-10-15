@@ -46,6 +46,7 @@ export function buildComparisonWorkbook(
     itemList.map((item, idx) => ({
       '#': idx + 1,
       'Status': item.status.replace(/_/g, ' '),
+      'Match Tier': item.matchTier ? item.matchTier.replace(/_/g, ' ') : 'N/A',
       'Reference Code': item.ref,
       'Advertiser / Title': item.advertName,
       'Program / Show': item.program,
@@ -58,6 +59,8 @@ export function buildComparisonWorkbook(
       'Campaign End': item.campaignEndDate,
       'Explanation': item.explanation,
       'Recommended Follow-up': item.recommendedFollowUp,
+      'Manually Corrected': item.isManuallyCorrected ? 'Yes' : 'No',
+      'Correction Note': item.manualCorrectionNote || '',
       'Reviewed': item.isReviewed ? 'Yes' : 'No',
       'Review Note': item.reviewNote || '',
     }));
@@ -194,23 +197,39 @@ export function buildComparisonPDF(
   });
 
   // Table Data
-  const tableRows = itemsToExport.map((item, idx) => [
-    String(idx + 1),
-    item.status.replace(/_/g, ' '),
-    item.ref,
-    item.advertName.length > 25 ? item.advertName.slice(0, 25) + '...' : item.advertName,
-    item.program.length > 20 ? item.program.slice(0, 20) + '...' : item.program,
-    item.scheduledTime,
-    item.actualAiringTime,
-    `${item.expectedCount} / ${item.actualCount}`,
-    item.duration,
-    item.explanation.length > 45 ? item.explanation.slice(0, 45) + '...' : item.explanation,
-    item.recommendedFollowUp.length > 40 ? item.recommendedFollowUp.slice(0, 40) + '...' : item.recommendedFollowUp,
-    item.isReviewed ? `Yes: ${item.reviewNote || 'OK'}` : 'Unreviewed',
-  ]);
+  const tableRows = itemsToExport.map((item, idx) => {
+    let statusText = item.status.replace(/_/g, ' ');
+    if (item.isManuallyCorrected) {
+      statusText += '\n[Corrected]';
+    } else if (item.matchTier && item.matchTier !== 'UNMATCHED') {
+      const tierShort = item.matchTier === 'EXACT_REF' ? 'Exact' : item.matchTier === 'CONSTRAINED_NORM_REF' ? 'Norm' : 'Title';
+      statusText += `\n(${tierShort})`;
+    }
+
+    let reviewText = item.isReviewed ? `Yes: ${item.reviewNote || 'OK'}` : 'Unreviewed';
+    if (item.isManuallyCorrected) {
+      reviewText += item.manualCorrectionNote ? `\n(Corr: ${item.manualCorrectionNote.slice(0, 30)})` : '\n(Manual Corr)';
+    }
+
+    return [
+      String(idx + 1),
+      statusText,
+      item.ref,
+      item.advertName.length > 25 ? item.advertName.slice(0, 25) + '...' : item.advertName,
+      item.program.length > 20 ? item.program.slice(0, 20) + '...' : item.program,
+      item.scheduledTime,
+      item.actualAiringTime,
+      `${item.expectedCount} / ${item.actualCount}`,
+      item.duration,
+      item.explanation.length > 45 ? item.explanation.slice(0, 45) + '...' : item.explanation,
+      item.recommendedFollowUp.length > 40 ? item.recommendedFollowUp.slice(0, 40) + '...' : item.recommendedFollowUp,
+      reviewText,
+    ];
+  });
 
   autoTable(doc, {
     startY: 130,
+    margin: { left: 25, right: 25 },
     head: [[
       '#',
       'Status',
@@ -242,18 +261,10 @@ export function buildComparisonPDF(
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 20 },
-      1: { cellWidth: 60, fontStyle: 'bold' },
-      2: { cellWidth: 65, fontStyle: 'bold' },
-      3: { cellWidth: 90 },
-      4: { cellWidth: 70 },
-      5: { cellWidth: 60 },
-      6: { cellWidth: 65 },
-      7: { cellWidth: 35, halign: 'center' },
-      8: { cellWidth: 30 },
-      9: { cellWidth: 120 },
-      10: { cellWidth: 110 },
-      11: { cellWidth: 60 },
+      0: { halign: 'center' },
+      1: { fontStyle: 'bold' },
+      2: { fontStyle: 'bold' },
+      7: { halign: 'center' },
     },
     didDrawPage: () => {
       const str = `Page ${doc.getNumberOfPages()}  |  Broadcast Ad Verification System  |  Confidential Managerial Audit`;

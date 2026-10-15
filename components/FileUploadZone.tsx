@@ -35,7 +35,8 @@ interface FileUploadZoneProps {
     logRecords: LogRecord[],
     broadcastDate: Date,
     scheduleName: string,
-    logName: string
+    logName: string,
+    rawLogText?: string
   ) => void;
   isComparing: boolean;
   onLoadSample: () => void;
@@ -176,7 +177,8 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
       logParseResult.records,
       bDate,
       scheduleState.name,
-      logState.name
+      logState.name,
+      logState.decoded?.text || ''
     );
   };
 

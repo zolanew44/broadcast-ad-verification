@@ -13,6 +13,7 @@ import {
   CalendarOff,
   AlertTriangle,
   Award,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { ComparisonSummary, AdDiscrepancyItem } from '@/types';
 
@@ -21,6 +22,7 @@ interface DashboardSummaryProps {
   items: AdDiscrepancyItem[];
   onExportExcel: () => void;
   onExportPDF: () => void;
+  onOpenFixMissing?: () => void;
   activeFilterStatus: string;
   onSelectStatusFilter: (status: string) => void;
 }
@@ -30,6 +32,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
   items,
   onExportExcel,
   onExportPDF,
+  onOpenFixMissing,
   activeFilterStatus,
   onSelectStatusFilter,
 }) => {
@@ -74,8 +77,24 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
             </p>
           </div>
 
-          {/* Export Action Buttons */}
+          {/* Action Buttons */}
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-3">
+            {onOpenFixMissing && (
+              <button
+                onClick={onOpenFixMissing}
+                className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition shadow-sm hover:shadow active:scale-98"
+                title="Fix Missing Ads and Export Corrected TXT Log"
+              >
+                <SlidersHorizontal className="w-4 h-4 mr-2" />
+                Fix Missing Ads &amp; Correct Log
+                {summary.potentiallyMissingPlacements > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold">
+                    {summary.potentiallyMissingPlacements}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={onExportExcel}
               className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-sm hover:shadow active:scale-98"

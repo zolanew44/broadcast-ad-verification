@@ -9,8 +9,14 @@ export interface ScheduleParseResult {
   headers: string[];
 }
 
-import { normalizeRefCode } from './refNormalizer';
-export { normalizeRefCode };
+import {
+  normalizeRefExact,
+  normalizeRefCanonical,
+  normalizeRefCode,
+  normalizeAdvertName,
+  extractAdVersion,
+} from './refNormalizer';
+export { normalizeRefCode, normalizeRefExact, normalizeRefCanonical, normalizeAdvertName, extractAdVersion };
 
 /**
  * Parses schedule raw text into structured ScheduleRecord items.
@@ -143,8 +149,11 @@ export function parseScheduleText(text: string, broadcastDate: Date): SchedulePa
       time,
       placements,
       ref,
-      normRef: normalizeRefCode(ref),
+      exactRef: normalizeRefExact(ref),
+      normRef: normalizeRefCanonical(ref),
       advert,
+      normAdvert: normalizeAdvertName(advert),
+      adVersion: extractAdVersion(ref, advert),
       sec,
       rawStartDate,
       rawEndDate,
