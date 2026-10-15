@@ -746,7 +746,19 @@ describe('Local Private Fixtures (October 13, 2026 - Production Data)', () => {
     const at1187Missing = at1187Items.filter(i => i.status === 'POTENTIALLY_MISSING');
     expect(at1187Missing.length).toBe(0);
 
-    // 3. Test report builders on full production results
+    // 3. Verify INAD 182-AD2 (Mixed space-and-hyphen reference code):
+    // 6 scheduled placements: 5 matched on exact duration, 1 duration review, 0 missing!
+    const inad182Items = result.items.filter(i => i.ref === 'INAD 182-AD2');
+    expect(inad182Items.length).toBeGreaterThanOrEqual(6);
+    expect(inad182Items.filter(i => i.status === 'POTENTIALLY_MISSING').length).toBe(0);
+    expect(inad182Items.filter(i => i.status === 'MATCHED').length).toBe(5);
+
+    // 4. Verify overall discrepancy totals:
+    // Exactly 1 genuine missing placement remains (AAD-1918 partial delivery: 2 scheduled, 1 logged)
+    expect(result.summary.potentiallyMissingPlacements).toBe(1);
+    expect(result.summary.matchedPlacements).toBe(150);
+
+    // 5. Test report builders on full production results
     const wb = buildComparisonWorkbook(result);
     expect(wb.SheetNames.length).toBeGreaterThanOrEqual(5);
 
@@ -805,15 +817,28 @@ describe('Priority 3-Tier Matching Strategy & Robust Log Parsing', () => {
     const singleSpaceHyphen = extractLogRefAndAdvert('GLOBAL-9000 Ethiopian Airlines');
     expect(singleSpaceHyphen).toEqual({ ref: 'GLOBAL-9000', advert: 'Ethiopian Airlines' });
 
+    // Single-space mixed space-and-hyphen reference code (e.g. INAD 182-AD2 G- power up)
+    const mixedSpaceHyphen = extractLogRefAndAdvert('INAD 182-AD2 G- power up');
+    expect(mixedSpaceHyphen).toEqual({ ref: 'INAD 182-AD2', advert: 'G- power up' });
+
+    // Single-space mixed code with version cut (e.g. INAD 156-AD1 Mewab Fashion)
+    const mixedCut = extractLogRefAndAdvert('INAD 156-AD1 Mewab Fashion');
+    expect(mixedCut).toEqual({ ref: 'INAD 156-AD1', advert: 'Mewab Fashion' });
+
     // Standalone code without title
     const standalone = extractLogRefAndAdvert('GLOBAL-9000');
     expect(standalone).toEqual({ ref: 'GLOBAL-9000', advert: '' });
 
-    // Station interstitials and non-ad lines return null
+    const standaloneSpaceTokens = extractLogRefAndAdvert('INAD 182-AD2');
+    expect(standaloneSpaceTokens).toEqual({ ref: 'INAD 182-AD2', advert: '' });
+
+    // Station interstitials, non-ad lines, and program/song titles with digits return null
     expect(extractLogRefAndAdvert('TRAN Station ID 01')).toBeNull();
     expect(extractLogRefAndAdvert('ABBAY FILM')).toBeNull();
     expect(extractLogRefAndAdvert('የማስታወቂያ ሰአት')).toBeNull();
     expect(extractLogRefAndAdvert('Evening Program News')).toBeNull();
+    expect(extractLogRefAndAdvert('3D Toothpaste Brought to you by')).toBeNull();
+    expect(extractLogRefAndAdvert('Dawite Mekonen -Lameenuu SEP-15')).toBeNull();
   });
 
   it('matches via Tier 1 (EXACT_REF) when reference code matches exactly', () => {
@@ -944,5 +969,33 @@ describe('Priority 3-Tier Matching Strategy & Robust Log Parsing', () => {
     expect(res.summary.matchedPlacements).toBe(1);
     expect(res.summary.possibleDuplicates).toBe(1);
     expect(res.summary.extraAirings).toBe(1);
+  });
+
+  it('verifies mixed space-and-hyphen reference codes (e.g. INAD 182-AD2) match on-air playout and are never falsely marked missing', () => {
+    // Schedule has mixed space-and-hyphen reference: "INAD 182-AD2"
+    const schedText = 'Date\tShow\tTime\tPlacements\tRef\tAdvert\tSec\tStart Date\tEnd Date\r\n' +
+      'Morning\tMorning Magazine\t03:00\tBeginning\tINAD 182-AD2\tEnergy Boost Promo\t70\tOct 01/2026\tOngoing\r\n' +
+      'Afternoon\tAfternoon Show\t15:30\tMiddle\tINAD 182-AD2\tEnergy Boost Promo\t70\tOct 01/2026\tOngoing\r\n';
+
+    // Log has single-space between reference and advert: "INAD 182-AD2 Energy Boost Promo"
+    // Plus a third extra airing
+    const logText = '13-10-2026 03:01:17\t00006C4B\tINAD 182-AD2 Energy Boost Promo\t00:01:10\r\n' +
+      '13-10-2026 15:36:53\t000004B3\tINAD 182-AD2 Energy Boost Promo\t00:01:10\r\n' +
+      '13-10-2026 22:23:16\t00000549\tINAD 182-AD2 Energy Boost Promo\t00:01:10\r\n';
+
+    const sResult = parseScheduleText(schedText, broadcastDate);
+    const lResult = parseLogText(logText);
+    const res = runAdComparison(sResult.records, lResult.records, { broadcastDate });
+
+    expect(res.summary.eligiblePlacements).toBe(2);
+    expect(res.summary.matchedPlacements).toBe(2);
+    expect(res.summary.potentiallyMissingPlacements).toBe(0);
+    expect(res.summary.extraAirings).toBe(1);
+
+    const matched = res.items.filter(i => i.status === 'MATCHED');
+    expect(matched.length).toBe(2);
+    expect(matched[0].ref).toBe('INAD 182-AD2');
+    expect(matched[0].actualAiringTime).toBe('13-10-2026 03:01:17');
+    expect(matched[1].actualAiringTime).toBe('13-10-2026 15:36:53');
   });
 });

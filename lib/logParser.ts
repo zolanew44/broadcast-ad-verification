@@ -57,26 +57,51 @@ export function extractLogRefAndAdvert(item: string): { ref: string; advert: str
   }
 
   // 4. Single-space separation:
-  // 4a. Hyphenated or delimited code of arbitrary prefix length
+  // 4a. Mixed space-and-hyphen or tokenized reference codes:
+  // Prefix followed by one or more segments containing digits, sub-codes, or creative cuts (e.g. AD1, A1, CUT 1, etc.)
+  // Examples:
+  // - "INAD 182-AD2 G- power up" -> ref: "INAD 182-AD2", advert: "G- power up"
+  // - "INAD 156-AD1 Mewab Fashion" -> ref: "INAD 156-AD1", advert: "Mewab Fashion"
+  // - "AT 1187 1 AD1 Awach Title" -> ref: "AT 1187 1 AD1", advert: "Awach Title"
+  // - "AT-1187-1-AD1 Awach Title" -> ref: "AT-1187-1-AD1", advert: "Awach Title"
+  // - "GLOBAL-9000 Launch Title" -> ref: "GLOBAL-9000", advert: "Launch Title"
+  // - "C-101 Coffee Promo" -> ref: "C-101", advert: "Coffee Promo"
+  const refCodeMatch = text.match(
+    /^([A-Z0-9]+(?:[\s\-_]+(?:\d+[A-Z0-9\-_]*|AD\d*|A\d+|CUT\s*\d+|V\d+|VERSION\s*\d+))+)\s+(.+)$/i
+  );
+  if (refCodeMatch && /\d/.test(refCodeMatch[1])) {
+    return { ref: refCodeMatch[1].trim(), advert: refCodeMatch[2].trim() };
+  }
+
+  // 4b. Purely hyphenated or delimited code of arbitrary prefix length
   // Example: "GLOBAL-9000 Launch Title", "C-101 Coffee Promo", "AT-1187-1-AD1 Awach Title"
-  const hyphenMatch = text.match(/^([A-Z0-9]+(?:[\-_][A-Z0-9]+)+)\s+(.*)$/i);
+  const hyphenMatch = text.match(/^([A-Z0-9]+(?:[\-_][A-Z0-9]+)+)\s+(.+)$/i);
   if (hyphenMatch && /\d/.test(hyphenMatch[1])) {
     return { ref: hyphenMatch[1].trim(), advert: hyphenMatch[2].trim() };
   }
 
-  // 4b. Space-separated reference tokens:
+  // 4c. Space-separated reference tokens:
   // Prefix followed by numeric tokens or creative version cuts (AD1, A1, CUT 1, etc.)
   // Example: "AT 1187 1 AD1 Awach Title", "INAD 081 A1 Ruggas Soft Drink"
-  const spaceTokensMatch = text.match(/^([A-Z0-9]+(?:\s+(?:\d+|AD\d*|A\d+|CUT\s*\d+|V\d+|VERSION\s*\d+))+)\s+(.*)$/i);
+  const spaceTokensMatch = text.match(/^([A-Z0-9]+(?:\s+(?:\d+|AD\d*|A\d+|CUT\s*\d+|V\d+|VERSION\s*\d+))+)\s+(.+)$/i);
   if (spaceTokensMatch && /\d/.test(spaceTokensMatch[1])) {
     return { ref: spaceTokensMatch[1].trim(), advert: spaceTokensMatch[2].trim() };
   }
 
   // 5. Standalone reference code with no trailing title
-  // Example: "AAD-1918", "AT-1187-1-AD1", "GLOBAL-9000", "C-101", "AT 1187 1 AD1"
-  const standaloneMatch = text.match(/^([A-Z0-9]+(?:[\s\-_]+[A-Z0-9]+)*)$/i);
-  if (standaloneMatch && /\d/.test(standaloneMatch[1])) {
-    return { ref: standaloneMatch[1].trim(), advert: '' };
+  // 5a. Purely hyphenated standalone code: e.g. "AAD-1918", "AT-1187-1-AD1", "GLOBAL-9000", "C-101"
+  const standaloneHyphen = text.match(/^([A-Z0-9]+(?:[\-_][A-Z0-9]+)+)$/i);
+  if (standaloneHyphen && /\d/.test(standaloneHyphen[1])) {
+    return { ref: standaloneHyphen[1].trim(), advert: '' };
+  }
+
+  // 5b. Space-token standalone code where all segments after prefix are numeric or cut versions:
+  // e.g. "INAD 182-AD2", "AT 1187 1 AD1", "INAD 081 A1", "INAD 087"
+  const standaloneSpace = text.match(
+    /^([A-Z0-9]+(?:\s+(?:\d+[A-Z0-9\-_]*|AD\d*|A\d+|CUT\s*\d+|V\d+|VERSION\s*\d+))+)$/i
+  );
+  if (standaloneSpace && /\d/.test(standaloneSpace[1])) {
+    return { ref: standaloneSpace[1].trim(), advert: '' };
   }
 
   return null;
